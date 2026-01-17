@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["sentinel", "sentinel-common", "sentinel-ebpf"]
+members = ["sample_attacks/dependency_injection","sentinel", "sentinel-common", "sentinel-ebpf"]
 default-members = ["sentinel", "sentinel-common"]
 
 [workspace.package]

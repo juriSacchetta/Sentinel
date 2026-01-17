@@ -8,6 +8,7 @@ pub enum HookType {
     MemfdCreate = 1,
     MemfdExit = 2,
     Execve = 3,
+    Mmap = 4,
 }
 
 impl HookType {
@@ -17,6 +18,7 @@ impl HookType {
             HookType::MemfdCreate => b"MEMFD_CREATE\0",
             HookType::MemfdExit => b"MEMFD_EXIT\0",
             HookType::Execve => b"EXECVE\0",
+            HookType::Mmap => b"MMAP\0",
         }
     }
 }
@@ -58,4 +60,13 @@ pub struct ExecveEvent {
     pub header: EventHeader,
     pub fd: u32,
     pub flags: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct MmapEvent {
+    pub header: EventHeader,
+    pub fd: u32,
+    pub prot: u32,  // Protection flags (Read/Write/Exec)
+    pub flags: u32, // Map flags (Shared/Private)
 }

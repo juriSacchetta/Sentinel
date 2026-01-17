@@ -13,7 +13,9 @@ use aya_ebpf::{
     maps::PerfEventArray,
     programs::TracePointContext,
 };
-use sentinel_common::{EventHeader, ExecveEvent, HookType, MemfdEnterEvent, MemfdExitEvent};
+use sentinel_common::{
+    EventHeader, ExecveEvent, HookType, MemfdEnterEvent, MemfdExitEvent, MmapEvent,
+};
 
 macro_rules! log {
     ($hook:expr, $msg:literal) => {
@@ -148,6 +150,22 @@ pub fn sys_enter_execveat(ctx: TracePointContext) -> u32 {
         header: make_header(HookType::Execve),
         fd,
         flags,
+    };
+
+    send_event!(ctx, event);
+    0
+}
+
+#[tracepoint]
+pub fn sys_enter_mmap(ctx: TracePointContext) -> u32 {
+    let prot = unsafe { ctx.read_at::<u64>(32).unwrap_or(0) as u32 };
+    let fd = unsafe { ctx.read_at::<u64>(48).unwrap_or(0) as u32 };
+
+    let event = MmapEvent {
+        header: make_header(HookType::Mmap),
+        fd,
+        prot,
+        flags: 0, // We can skip others to save bandwidth
     };
 
     send_event!(ctx, event);

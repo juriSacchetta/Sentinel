@@ -11,7 +11,9 @@ use aya::{
 };
 use bytes::BytesMut;
 use log::{debug, info, warn};
-use sentinel_common::{EventHeader, ExecveEvent, HookType, MemfdEnterEvent, MemfdExitEvent};
+use sentinel_common::{
+    EventHeader, ExecveEvent, HookType, MemfdEnterEvent, MemfdExitEvent, MmapEvent,
+};
 use tokio::{io::unix::AsyncFd, signal};
 
 use crate::core::{SharedTracker, TrackerState};
@@ -60,18 +62,23 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    let program_enter: &mut TracePoint = ebpf.program_mut("memfd_create").unwrap().try_into()?;
-    program_enter.load()?;
-    program_enter.attach("syscalls", "sys_enter_memfd_create")?;
+    attach_hook(
+        &mut ebpf,
+        "memfd_create",
+        "syscalls",
+        "sys_enter_memfd_create",
+    );
 
-    let program_exit: &mut TracePoint = ebpf.program_mut("memfd_exit").unwrap().try_into()?;
-    program_exit.load()?;
-    program_exit.attach("syscalls", "sys_exit_memfd_create")?;
+    attach_hook(&mut ebpf, "memfd_exit", "syscalls", "sys_exit_memfd_create");
 
-    let program_exit: &mut TracePoint =
-        ebpf.program_mut("sys_enter_execveat").unwrap().try_into()?;
-    program_exit.load()?;
-    program_exit.attach("syscalls", "sys_enter_execveat")?;
+    attach_hook(
+        &mut ebpf,
+        "sys_enter_execveat",
+        "syscalls",
+        "sys_enter_execveat",
+    );
+
+    attach_hook(&mut ebpf, "sys_enter_mmap", "syscalls", "sys_enter_mmap");
 
     let mut events = PerfEventArray::try_from(ebpf.take_map("EVENTS").unwrap())?;
 
@@ -165,8 +172,68 @@ fn process_packet(buf: &[u8], tracker_mutex: &SharedTracker) {
                 }
             }
         }
+        HookType::Mmap => {
+            if buf.len() >= mem::size_of::<MmapEvent>() {
+                let event = unsafe { (ptr as *const MmapEvent).read_unaligned() };
+
+                let state = tracker_mutex.lock().unwrap();
+
+                if let Some(map) = state.get_active(&header.pid)
+                    && let Some(name) = map.get(&event.fd)
+                {
+                    let is_executable = (event.prot & (libc::PROT_EXEC as u32)) != 0;
+                    if is_executable {
+                        println!("🚨 [ALERT] REFLECTIVE CODE LOADING DETECTED!");
+                        println!("    PID:    {}", header.pid);
+                        println!("    FD:     {} ({})", event.fd, name);
+                        println!("    Action: mmap(PROT_EXEC)");
+                    }
+                }
+            }
+        }
         _ => {
             warn!("Unknown event type received: {:?}", header.event_type);
         }
+    }
+}
+
+fn attach_hook(ebpf: &mut aya::Ebpf, prog_name: &str, category: &str, event_name: &str) {
+    // 1. Try to find the program by name
+    let program = match ebpf.program_mut(prog_name) {
+        Some(p) => p,
+        None => {
+            warn!(
+                "eBPF Program '{}' not found. Check your kernel code names.",
+                prog_name
+            );
+            return;
+        }
+    };
+
+    // 2. Try to interpret it as a TracePoint
+    let tracepoint: &mut TracePoint = match program.try_into() {
+        Ok(tp) => tp,
+        Err(e) => {
+            warn!("Program '{}' is not a TracePoint: {}", prog_name, e);
+            return;
+        }
+    };
+
+    // 3. Try to Load
+    match tracepoint.load() {
+        Ok(_) => debug!("Loaded program '{}'", prog_name),
+        Err(e) => {
+            warn!("Failed to load program '{}': {}", prog_name, e);
+            return;
+        }
+    }
+
+    // 4. Try to Attach
+    match tracepoint.attach(category, event_name) {
+        Ok(_) => info!("Attached '{}' to {}/{}", prog_name, category, event_name),
+        Err(e) => warn!(
+            "Failed to attach '{}' to {}/{}: {}",
+            prog_name, category, event_name, e
+        ),
     }
 }
