@@ -1,4 +1,8 @@
-use std::mem;
+pub mod core;
+use std::{
+    mem,
+    sync::{Arc, Mutex},
+};
 
 use aya::{
     maps::perf::{PerfEventArray, PerfEventArrayBuffer},
@@ -7,8 +11,10 @@ use aya::{
 };
 use bytes::BytesMut;
 use log::{debug, info, warn};
-use sentinel_common::{EventHeader, HookType, MemfdEnterEvent, MemfdExitEvent};
+use sentinel_common::{EventHeader, ExecveEvent, HookType, MemfdEnterEvent, MemfdExitEvent};
 use tokio::{io::unix::AsyncFd, signal};
+
+use crate::core::{SharedTracker, TrackerState};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -33,6 +39,8 @@ async fn main() -> anyhow::Result<()> {
         env!("OUT_DIR"),
         "/sentinel"
     )))?;
+
+    let tracker = Arc::new(Mutex::new(TrackerState::new()));
 
     match aya_log::EbpfLogger::init(&mut ebpf) {
         Err(e) => {
@@ -60,11 +68,18 @@ async fn main() -> anyhow::Result<()> {
     program_exit.load()?;
     program_exit.attach("syscalls", "sys_exit_memfd_create")?;
 
+    let program_exit: &mut TracePoint =
+        ebpf.program_mut("sys_enter_execveat").unwrap().try_into()?;
+    program_exit.load()?;
+    program_exit.attach("syscalls", "sys_enter_execveat")?;
+
     let mut events = PerfEventArray::try_from(ebpf.take_map("EVENTS").unwrap())?;
 
     for cpu_id in online_cpus().unwrap() {
         // Open the buffer for this specific CPU
         let buf = events.open(cpu_id, None)?;
+
+        let tracker_clone = tracker.clone();
 
         tokio::task::spawn(async move {
             let mut buffers = (0..10)
@@ -77,7 +92,7 @@ async fn main() -> anyhow::Result<()> {
                 let events_read = guard.get_inner_mut().read_events(&mut buffers).unwrap();
                 guard.clear_ready();
                 for bytes in buffers.iter_mut().take(events_read.read) {
-                    process_packet(bytes);
+                    process_packet(bytes, &tracker_clone);
                 }
             }
         });
@@ -90,7 +105,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn process_packet(buf: &[u8]) {
+fn process_packet(buf: &[u8], tracker_mutex: &SharedTracker) {
     if buf.len() < mem::size_of::<EventHeader>() {
         return;
     }
@@ -107,6 +122,11 @@ fn process_packet(buf: &[u8]) {
                     .trim_matches('\0')
                     .to_string();
 
+                {
+                    let mut tracker = tracker_mutex.lock().unwrap();
+                    tracker.insert_pending(header.pid, name.clone());
+                }
+
                 println!(
                     "[ENTER] PID: {:<6} | Asking for File: '{}'",
                     header.pid, name
@@ -117,7 +137,32 @@ fn process_packet(buf: &[u8]) {
             if buf.len() >= mem::size_of::<MemfdExitEvent>() {
                 let event = unsafe { (ptr as *const MemfdExitEvent).read_unaligned() };
 
+                {
+                    let mut tracker = tracker_mutex.lock().unwrap();
+                    tracker.promote_to_active(header.pid, event.fd);
+                }
+
+                println!(
+                    "ℹ️  [TRACK] PID {} created memfd FD {}",
+                    header.pid, event.fd
+                );
                 println!("[EXIT]  PID: {:<6} | Created FD: {}", header.pid, event.fd);
+            }
+        }
+        HookType::Execve => {
+            if buf.len() >= mem::size_of::<ExecveEvent>() {
+                let event = unsafe { (ptr as *const ExecveEvent).read_unaligned() };
+                let tracker = tracker_mutex.lock().unwrap();
+
+                if let Some(map) = tracker.get_active(&header.pid)
+                    && let Some(name) = map.get(&event.fd)
+                {
+                    println!("🚨 [ALERT] FILELESS EXECUTION DETECTED!");
+                    println!("    PID:   {}", header.pid);
+                    println!("    FD:    {}", event.fd);
+                    println!("    Name:  {}", name); // NOW SHOWS REAL NAME
+                    println!("    Flags: {}", event.flags);
+                }
             }
         }
         _ => {

@@ -13,7 +13,7 @@ use aya_ebpf::{
     maps::PerfEventArray,
     programs::TracePointContext,
 };
-use sentinel_common::{EventHeader, HookType, MemfdEnterEvent, MemfdExitEvent};
+use sentinel_common::{EventHeader, ExecveEvent, HookType, MemfdEnterEvent, MemfdExitEvent};
 
 macro_rules! log {
     ($hook:expr, $msg:literal) => {
@@ -123,6 +123,34 @@ pub fn memfd_exit(ctx: TracePointContext) -> u32 {
 
     send_event!(ctx, event);
 
+    0
+}
+
+#[tracepoint]
+pub fn sys_enter_execveat(ctx: TracePointContext) -> u32 {
+    // syscall signature: int execveat(int dirfd, const char *pathname, ... , int flags)
+
+    let fd = unsafe {
+        match ctx.read_at::<i64>(16) {
+            Ok(val) => val as u32,
+            Err(_) => return 0,
+        }
+    };
+
+    let flags = unsafe {
+        match ctx.read_at::<i64>(48) {
+            Ok(val) => val as u32,
+            Err(_) => return 0,
+        }
+    };
+
+    let event = ExecveEvent {
+        header: make_header(HookType::Execve),
+        fd,
+        flags,
+    };
+
+    send_event!(ctx, event);
     0
 }
 

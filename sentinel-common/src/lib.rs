@@ -51,3 +51,11 @@ pub struct MemfdExitEvent {
     pub fd: u32,
     pub ret: i64,
 }
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ExecveEvent {
+    pub header: EventHeader,
+    pub fd: u32,
+    pub flags: u32,
+}
