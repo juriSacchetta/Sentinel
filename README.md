@@ -1,63 +1,98 @@
-# 🛡️ Sentinel: eBPF Fileless Malware Detector
+<div align="center">
 
-![Rust](https://img.shields.io/badge/Language-Rust-orange.svg)
-![Platform](https://img.shields.io/badge/Platform-Linux-blue.svg)
-![Tech](https://img.shields.io/badge/Technology-eBPF-green.svg)
+# 🛡️ Sentinel
 
-**Sentinel** is a runtime security monitoring tool designed to detect **Fileless Malware** execution on Linux systems. It leverages **eBPF (Extended Berkeley Packet Filter)** to hook system calls directly in the kernel, providing high-performance, safe, and stealthy observability.
+### eBPF Observability & Security MVP
 
-Unlike traditional antivirus software that scans files on disk, Sentinel monitors **in-memory** behavior to catch attacks that never touch the filesystem.
+[![Rust](https://img.shields.io/badge/Language-Rust-orange.svg?logo=rust)](https://www.rust-lang.org/)
+[![Platform](https://img.shields.io/badge/Platform-Linux-blue.svg?logo=linux)](https://www.kernel.org/)
+[![Tech](https://img.shields.io/badge/Technology-eBPF-green.svg?logo=linux)](https://ebpf.io/)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+[**Installation**](#-installation) • [**Architecture**](#-architecture) • [**Techniques**](#-detection-techniques--status)
+
+</div>
+
+---
+
+**Sentinel** is an experimental security observability tool built to explore the capabilities of **eBPF (Extended Berkeley Packet Filter)** on Linux.
+
+Designed as a "Just for Fun" MVP, this project aims to answer a simple question: *How much visibility can we get into in-memory threats without touching the disk?*
+
+Instead of building a full-blown antivirus, Sentinel serves as a proof-of-concept for kernel-level instrumentation. It hooks specific system calls to track the lifecycle of anonymous files, demonstrating how modern Linux features can be monitored to detect stealthy execution patterns.
 
 ---
 
 ## 🏗️ Architecture
 
 Sentinel operates using a split-architecture design:
-1.  **Kernel Space (eBPF):** Tiny, safe programs attach to kernel tracepoints to capture raw syscall events.
-2.  **User Space (Rust/Tokio):** An asynchronous runtime processes events, maintains state, and correlates actions to detect threats.
+
+1. **Kernel Space (eBPF):** Tiny, safe programs attach to kernel tracepoints to capture raw syscall events.
+2. **User Space (Rust/Tokio):** An asynchronous runtime processes events, maintains state, and correlates actions to detect threats.
 
 ```mermaid
-sequenceDiagram
-    participant Attacker
-    participant Kernel (eBPF)
-    participant Sentinel (Userspace)
+graph TD
+    %% Actors
+    Attacker[Attacker]
 
-    Attacker->>Kernel: memfd_create("payload")
-    Note right of Kernel: Hook: sys_enter_memfd_create
-    Kernel->>Sentinel: [Event] PID 123 wants "payload"
-    Sentinel->>Sentinel: Store Pending Name
+    %% Kernel Space Subgraph
+    subgraph Kernel["Kernel Space (eBPF)"]
+        direction TB
+        T1(Tracepoint: sys_enter_memfd_create)
+        T2(Tracepoint: sys_enter_execveat)
+        T3(Tracepoint: sys_enter_mmap)
+    end
 
-    Kernel-->>Attacker: Returns FD 3
-    Note right of Kernel: Hook: sys_exit_memfd_create
-    Kernel->>Sentinel: [Event] PID 123 got FD 3
-    Sentinel->>Sentinel: Track: PID 123, FD 3 = "payload"
+    %% User Space Subgraph
+    subgraph User["User Space (Rust/Tokio)"]
+        direction TB
+        Buffer[(PerfEventArray Ring Buffer)]
+        Loop[Async Event Loop]
+        Tracker[State Tracker HashMap]
+        Alert{🚨 Threat Detection Alert}
+    end
 
-    Attacker->>Kernel: execveat(FD 3)
-    Note right of Kernel: Hook: sys_enter_execveat
-    Kernel->>Sentinel: [Event] PID 123 executing FD 3
-    Sentinel->>Sentinel: 🚨 ALERT: Fileless Execution!
+    %% Connections
+    Attacker -- "Malicious Syscalls" --> T1
+    Attacker --> T2
+    Attacker --> T3
+
+    T1 --> Buffer
+    T2 --> Buffer
+    T3 --> Buffer
+
+    Buffer --> Loop
+    Loop --> Tracker
+    Tracker --> Alert
+
+    %% Styling
+    style Kernel fill:#ffeef0,stroke:#d63031,stroke-width:2px
+    style User fill:#e3f2fd,stroke:#0984e3,stroke-width:2px
+    style Alert fill:#fff,stroke:#d63031,stroke-width:4px,color:#d63031
 
 ```
 
-## 🚀 Key Features
+## 🕵️ Detection Techniques & Status
 
-* **Fileless Attack Detection:** Specifically targets the `memfd_create` + `execveat` chain used by advanced malware loaders.
-* **Stateful Tracking:** Correlates unrelated system calls (Creation vs. Execution) to reconstruct the lifecycle of an anonymous file.
-* **Zero-Copy Event Stream:** Uses `PerfEventArray` ring buffers for efficient kernel-to-user data transfer.
-* **Async Event Loop:** Built on `Tokio` to handle high-throughput event streams across multiple CPU cores without blocking.
+Sentinel focuses on "living off the land" techniques and memory-resident threats.
 
-## 🛠️ Technical Stack
+| Status | Technique | Pattern | Description |
+| :--- | :--- | :--- | :--- |
+| ✅ **Implemented** | **Fileless Execution** | `memfd_create` → `execveat` | Detects processes executing directly from anonymous memory (no disk file). |
+| ✅ **Implemented** | **Reflective Loading** | `mmap(PROT_EXEC)` | Detects anonymous memory being mapped as executable (Library Injection). |
+| 🚧 **Backlog** | **Reverse Shells** | `socket` → `dup2` | Detects redirection of shell STDIN/STDOUT to a network socket. |
+| 📋 **Backlog** | **Process Injection** | `ptrace` / `process_vm_writev` | Detects unauthorized code injection into running processes (e.g., SSHD). |
+| 📋 **Backlog** | **Persistence** | `openat(/etc/shadow, ...)` | Detects modification of critical system files (Cron, SSH Keys, Users). |
+| 📋 **Backlog** | **Log Wiping** | `unlinkat(/var/log/*)` | Detects deletion of system logs to cover tracks. |
 
-* **Language:** Rust (2021 Edition)
-* **eBPF Framework:** [Aya](https://aya-rs.dev/) (Native Rust eBPF library, no LLVM/BCC dependency)
-* **Async Runtime:** Tokio
+## 📂 Project Structure
 
-**Kernel Hooks:**
-* `sys_enter_memfd_create`: Capture intent and filenames.
-* `sys_exit_memfd_create`: Capture the returned File Descriptor.
-* `sys_enter_execveat`: Detect execution of file descriptors.
-
-
+| Crate | Description |
+| --- | --- |
+| **`sentinel`** | User-space application. Handles the async event loop, state tracking, and alerting logic. |
+| **`sentinel-ebpf`** | Kernel-space code. Defines the tracepoints and eBPF maps loaded into the kernel. |
+| **`sentinel-common`** | Shared library. Defines the TLV (Type-Length-Value) protocol and structs shared between Kernel and User space. |
+| **`sample_attacks`** | Safe malware simulators used to test and verify the detection engine. |
 
 ## 📦 Installation & Usage
 
@@ -83,40 +118,32 @@ sudo ./target/release/sentinel
 
 ```
 
-### Running the Attack Simulator
+---
 
-I have included a strictly educational "Malware Simulator" to demonstrate the detection capabilities. It mimics the behavior of a dropper executing a payload from memory.
+## 🧪 Testing & Verification
+
+I have included strictly educational **Malware Simulators** to demonstrate the detection capabilities against real-world attack patterns.
+
+### 1. Fileless Execution Attack
+
+Simulates a dropper that writes a binary to memory and executes it directly.
 
 ```bash
-# In a separate terminal
-./target/debug/malware_simulator
+cargo run --bin fileless
 
 ```
 
-## 📸 Demo Output
+### 2. Reflective Code Loading
 
-When the simulator attempts to run code from memory, Sentinel intercepts the sequence:
+Simulates a loader that maps a shared library from memory with executable permissions.
 
-```text
-[ENTER] PID: 234120 | Asking for File: 'suspicious_payload'
-ℹ️  [TRACK] PID 234120 created memfd FD 3
-[EXIT]  PID: 234120 | Created FD: 3
-
-🚨 [ALERT] FILELESS EXECUTION DETECTED!
-    PID:   234120
-    FD:    3
-    Name:  suspicious_payload
-    Flags: 4096
+```bash
+cargo run --bin dependency_injection
 
 ```
 
-## 🔮 Future Roadmap
-
-* [ ] **Reflective Loading Detection:** Hook `mmap` to detect when anonymous memory is mapped as `PROT_EXEC` (Dynamic Library Injection).
-* [ ] **Process Termination Cleanup:** Hook `sched_process_exit` to remove stale entries from the tracker map.
-* [ ] **eBPF CO-RE:** Implement "Compile Once, Run Everywhere" for broader kernel compatibility.
+---
 
 ## ⚖️ License
 
 This project is licensed under the MIT License - see the [LICENSE](https://www.google.com/search?q=LICENSE) file for details.
-
