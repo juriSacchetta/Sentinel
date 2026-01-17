@@ -51,7 +51,8 @@ sequenceDiagram
 * **Language:** Rust (2021 Edition)
 * **eBPF Framework:** [Aya](https://aya-rs.dev/) (Native Rust eBPF library, no LLVM/BCC dependency)
 * **Async Runtime:** Tokio
-* **Kernel Hooks:**
+
+**Kernel Hooks:**
 * `sys_enter_memfd_create`: Capture intent and filenames.
 * `sys_exit_memfd_create`: Capture the returned File Descriptor.
 * `sys_enter_execveat`: Detect execution of file descriptors.
@@ -119,4 +120,3 @@ When the simulator attempts to run code from memory, Sentinel intercepts the seq
 
 This project is licensed under the MIT License - see the [LICENSE](https://www.google.com/search?q=LICENSE) file for details.
 
-```
