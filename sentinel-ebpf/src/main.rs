@@ -5,7 +5,6 @@ use aya_ebpf::helpers::bpf_get_current_pid_tgid;
 use sentinel_common::{EventHeader, HookType};
 
 mod macros;
-mod maps;
 mod probes;
 
 #[inline(always)]

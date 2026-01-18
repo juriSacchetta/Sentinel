@@ -1,10 +1,22 @@
-use aya_ebpf::{macros::tracepoint, programs::TracePointContext};
+use aya_ebpf::{
+    macros::{map, tracepoint},
+    maps::HashMap,
+    programs::TracePointContext,
+};
 use sentinel_common::{HookType, SocketEvent};
 
-use crate::{
-    get_pid_tid, make_header,
-    maps::{SOCKET_STASH, SocketState},
-};
+use crate::{get_pid_tid, make_header};
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SocketState {
+    pub domain: u32,
+    pub type_: u32,
+    pub protocol: u32,
+}
+
+#[map]
+pub static SOCKET_STASH: HashMap<u32, SocketState> = HashMap::with_max_entries(1024, 0);
 
 #[tracepoint]
 pub fn sys_enter_socket(ctx: TracePointContext) -> u32 {

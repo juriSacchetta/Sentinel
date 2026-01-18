@@ -1,10 +1,17 @@
-use aya_ebpf::{macros::tracepoint, programs::TracePointContext};
-use sentinel_common::{ExecveEvent, HookType, MmapEvent};
+use aya_ebpf::{
+    macros::{map, tracepoint},
+    maps::PerfEventArray,
+    programs::TracePointContext,
+};
+use sentinel_common::{EventHeader, ExecveEvent, HookType, MmapEvent};
 
 use crate::make_header;
 
 pub mod memfd;
 pub mod socket;
+
+#[map]
+pub static EVENTS: PerfEventArray<EventHeader> = PerfEventArray::new(0);
 
 #[tracepoint]
 pub fn sys_enter_execveat(ctx: TracePointContext) -> u32 {

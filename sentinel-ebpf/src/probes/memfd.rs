@@ -1,12 +1,27 @@
 use aya_ebpf::{
-    helpers::bpf_probe_read_user_str_bytes, macros::tracepoint, programs::TracePointContext,
+    helpers::bpf_probe_read_user_str_bytes,
+    macros::{map, tracepoint},
+    maps::HashMap,
+    programs::TracePointContext,
 };
 use sentinel_common::{HookType, MemfdEvent};
 
-use crate::{
-    get_pid_tid, make_header,
-    maps::{MEMFD_STASH, MemfdState},
-};
+use crate::{get_pid_tid, make_header};
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct MemfdState {
+    pub filename: [u8; 256],
+}
+
+impl Default for MemfdState {
+    fn default() -> Self {
+        Self { filename: [0; 256] }
+    }
+}
+
+#[map]
+pub static MEMFD_STASH: HashMap<u32, MemfdState> = HashMap::with_max_entries(1024, 0);
 
 #[tracepoint]
 pub fn memfd_create(ctx: TracePointContext) -> u32 {
