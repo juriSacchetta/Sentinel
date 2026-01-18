@@ -1,20 +1,18 @@
-pub mod core;
-use std::{
-    mem,
-    sync::{Arc, Mutex},
-};
+mod bus;
+mod core;
+mod detectors;
+use std::sync::{Arc, Mutex};
 
-use aya::{
-    maps::perf::{PerfEventArray, PerfEventArrayBuffer},
-    programs::TracePoint,
-    util::online_cpus,
-};
+use aya::{maps::perf::PerfEventArray, programs::TracePoint, util::online_cpus};
 use bytes::BytesMut;
 use log::{debug, info, warn};
-use sentinel_common::{EventHeader, ExecveEvent, HookType, MemfdEvent, MmapEvent};
 use tokio::{io::unix::AsyncFd, signal};
 
-use crate::core::{SharedTracker, TrackerState};
+use crate::{
+    bus::EventBus,
+    core::TrackerState,
+    detectors::{FilelessDetector, ReflectiveLoaderDetector},
+};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -41,6 +39,13 @@ async fn main() -> anyhow::Result<()> {
     )))?;
 
     let tracker = Arc::new(Mutex::new(TrackerState::new()));
+
+    // 3. Setup Event Bus & Register Detectors
+    //    Ideally, wrap EventBus in Arc so it can be shared across async tasks
+    let mut bus = EventBus::new(tracker.clone());
+    bus.register(FilelessDetector);
+    bus.register(ReflectiveLoaderDetector);
+    // Future: bus.register(ReverseShellDetector);
 
     match aya_log::EbpfLogger::init(&mut ebpf) {
         Err(e) => {
@@ -80,24 +85,28 @@ async fn main() -> anyhow::Result<()> {
 
     let mut events = PerfEventArray::try_from(ebpf.take_map("EVENTS").unwrap())?;
 
-    for cpu_id in online_cpus().unwrap() {
-        // Open the buffer for this specific CPU
-        let buf = events.open(cpu_id, None)?;
+    let shared_bus = Arc::new(bus);
 
-        let tracker_clone = tracker.clone();
+    for cpu_id in online_cpus().unwrap() {
+        let buf = events.open(cpu_id, None)?;
+        let bus_clone = shared_bus.clone();
 
         tokio::task::spawn(async move {
             let mut buffers = (0..10)
                 .map(|_| BytesMut::with_capacity(1024))
                 .collect::<Vec<_>>();
+            let mut async_buf = AsyncFd::new(buf).unwrap();
 
-            let mut async_buf: AsyncFd<PerfEventArrayBuffer<_>> = AsyncFd::new(buf).unwrap();
             loop {
                 let mut guard = async_buf.readable_mut().await.unwrap();
                 let events_read = guard.get_inner_mut().read_events(&mut buffers).unwrap();
+                if events_read.lost > 0 {
+                    warn!("⚠️  DROPPED {} EVENTS! We are too slow!", events_read.lost);
+                }
                 guard.clear_ready();
+
                 for bytes in buffers.iter_mut().take(events_read.read) {
-                    process_packet(bytes, &tracker_clone);
+                    bus_clone.process_packet(bytes);
                 }
             }
         });
@@ -108,76 +117,6 @@ async fn main() -> anyhow::Result<()> {
     info!("Exiting...");
 
     Ok(())
-}
-
-fn process_packet(buf: &[u8], tracker_mutex: &SharedTracker) {
-    if buf.len() < mem::size_of::<EventHeader>() {
-        return;
-    }
-
-    let ptr = buf.as_ptr();
-    let header = unsafe { *(ptr as *const EventHeader) };
-
-    match header.event_type {
-        HookType::Memfd => {
-            if buf.len() >= mem::size_of::<MemfdEvent>() {
-                let event = unsafe { (ptr as *const MemfdEvent).read_unaligned() };
-
-                let name = String::from_utf8_lossy(&event.filename)
-                    .trim_matches('\0')
-                    .to_string();
-
-                {
-                    // Update Tracker directly (No more pending state needed)
-                    let mut tracker = tracker_mutex.lock().unwrap();
-                    tracker.add_active(header.pid, event.fd, &event.filename);
-                }
-
-                println!(
-                    "ℹ️  [TRACK] PID {} created memfd FD {} ('{}')",
-                    header.pid, event.fd, name
-                );
-            }
-        }
-        HookType::Execve => {
-            if buf.len() >= mem::size_of::<ExecveEvent>() {
-                let event = unsafe { (ptr as *const ExecveEvent).read_unaligned() };
-                let mut tracker = tracker_mutex.lock().unwrap();
-
-                if let Some(map) = tracker.get(&header.pid)
-                    && let Some(name) = map.get(&event.fd)
-                {
-                    println!("🚨 [ALERT] FILELESS EXECUTION DETECTED!");
-                    println!("    PID:   {}", header.pid);
-                    println!("    FD:    {}", event.fd);
-                    println!("    Name:  {}", name); // NOW SHOWS REAL NAME
-                    println!("    Flags: {}", event.flags);
-                }
-            }
-        }
-        HookType::Mmap => {
-            if buf.len() >= mem::size_of::<MmapEvent>() {
-                let event = unsafe { (ptr as *const MmapEvent).read_unaligned() };
-
-                let mut state = tracker_mutex.lock().unwrap();
-
-                if let Some(map) = state.get(&header.pid)
-                    && let Some(name) = map.get(&event.fd)
-                {
-                    let is_executable = (event.prot & (libc::PROT_EXEC as u32)) != 0;
-                    if is_executable {
-                        println!("🚨 [ALERT] REFLECTIVE CODE LOADING DETECTED!");
-                        println!("    PID:    {}", header.pid);
-                        println!("    FD:     {} ({})", event.fd, name);
-                        println!("    Action: mmap(PROT_EXEC)");
-                    }
-                }
-            }
-        }
-        _ => {
-            warn!("Unknown event type received: {:?}", header.event_type);
-        }
-    }
 }
 
 fn attach_hook(ebpf: &mut aya::Ebpf, prog_name: &str, category: &str, event_name: &str) {
@@ -193,7 +132,6 @@ fn attach_hook(ebpf: &mut aya::Ebpf, prog_name: &str, category: &str, event_name
         }
     };
 
-    // 2. Try to interpret it as a TracePoint
     let tracepoint: &mut TracePoint = match program.try_into() {
         Ok(tp) => tp,
         Err(e) => {
@@ -202,7 +140,6 @@ fn attach_hook(ebpf: &mut aya::Ebpf, prog_name: &str, category: &str, event_name
         }
     };
 
-    // 3. Try to Load
     match tracepoint.load() {
         Ok(_) => debug!("Loaded program '{}'", prog_name),
         Err(e) => {
@@ -211,7 +148,6 @@ fn attach_hook(ebpf: &mut aya::Ebpf, prog_name: &str, category: &str, event_name
         }
     }
 
-    // 4. Try to Attach
     match tracepoint.attach(category, event_name) {
         Ok(_) => info!("Attached '{}' to {}/{}", prog_name, category, event_name),
         Err(e) => warn!(
