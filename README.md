@@ -104,6 +104,21 @@ Sentinel focuses on "living off the land" techniques and memory-resident threats
 
 ### Building
 
+To Update he vmlinux.rs link to your current kernel headers, run:
+
+```bash
+aya-tool generate sockaddr \
+  sockaddr_in \
+  sockaddr_in6 \
+  task_struct \
+  file \
+  inode \
+  path \
+  dentry \
+  qstr > sentinel-ebpf/src/vmlinux.rs
+
+```
+
 ```bash
 cargo build --release
 

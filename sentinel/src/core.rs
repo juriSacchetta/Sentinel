@@ -2,13 +2,14 @@ use std::{
     collections::HashMap,
     fmt::Display,
     fs,
+    net::SocketAddr,
     path::PathBuf,
     sync::{Arc, Mutex},
     time::SystemTime,
 };
 
 use dashmap::DashMap;
-use sentinel_common::{Fd, Pid};
+use sentinel_common::{Fd, Pid, SocketAllocEvent};
 
 use crate::utils::SocketDomain;
 
@@ -21,11 +22,23 @@ pub enum DescriptorType {
         domain: SocketDomain,
         type_: u32,
         protocol: u32,
+        remote_addr: Option<SocketAddr>,
     },
     /// Regular file on disk (Potential Persistence/Exfiltration)
     File { path: String },
     /// Unknown or untracked
     Unknown,
+}
+
+impl From<SocketAllocEvent> for DescriptorType {
+    fn from(event: SocketAllocEvent) -> Self {
+        DescriptorType::Socket {
+            domain: SocketDomain::from(event.domain),
+            type_: event.type_ as u32,
+            protocol: event.protocol as u32,
+            remote_addr: None,
+        }
+    }
 }
 
 impl Display for DescriptorType {
@@ -36,11 +49,15 @@ impl Display for DescriptorType {
                 domain,
                 type_,
                 protocol,
+                remote_addr,
             } => {
                 write!(
                     f,
-                    "Socket(domain: {:?}, type: {}, protocol: {})",
-                    domain, type_, protocol
+                    "Socket(domain: {:?}, type: {}, protocol: {}, remote: {})",
+                    domain,
+                    type_,
+                    protocol,
+                    remote_addr.unwrap_or_else(|| "N/A".parse().unwrap())
                 )
             }
             DescriptorType::File { path } => write!(f, "File({})", path),

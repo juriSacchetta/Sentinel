@@ -2,9 +2,11 @@ use sentinel_common::EventHeader;
 
 mod fileless;
 mod reflective;
+mod reverse_shell;
 
 pub use fileless::FilelessDetector;
 pub use reflective::ReflectiveLoaderDetector;
+pub use reverse_shell::ReverseShellDetector;
 
 use crate::core::ProcessRegistry;
 

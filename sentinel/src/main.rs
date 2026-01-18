@@ -13,7 +13,7 @@ use tokio::{io::unix::AsyncFd, signal};
 use crate::{
     bus::EventBus,
     core::ProcessRegistry,
-    detectors::{FilelessDetector, ReflectiveLoaderDetector},
+    detectors::{FilelessDetector, ReflectiveLoaderDetector, ReverseShellDetector},
 };
 
 #[tokio::main]
@@ -47,7 +47,7 @@ async fn main() -> anyhow::Result<()> {
     let mut bus = EventBus::new(registry);
     bus.register(FilelessDetector);
     bus.register(ReflectiveLoaderDetector);
-    // Future: bus.register(ReverseShellDetector);
+    bus.register(ReverseShellDetector);
 
     match aya_log::EbpfLogger::init(&mut ebpf) {
         Err(e) => {

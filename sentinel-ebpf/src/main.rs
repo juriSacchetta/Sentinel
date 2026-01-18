@@ -6,6 +6,8 @@ use sentinel_common::{EventHeader, HookType, Pid, Tid};
 
 mod macros;
 mod probes;
+#[allow(warnings)]
+mod vmlinux;
 
 #[inline(always)]
 pub fn get_pid_tid() -> (Pid, Tid) {

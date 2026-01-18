@@ -15,7 +15,9 @@ pub enum HookType {
     Memfd,
     Execve,
     Mmap,
-    Socket,
+    SocketAlloc,
+    SocketConnect,
+    Dup,
 }
 
 impl HookType {
@@ -25,7 +27,9 @@ impl HookType {
             HookType::Memfd => b"MEMFD: \0",
             HookType::Execve => b"EXECVE\0",
             HookType::Mmap => b"MMAP\0",
-            HookType::Socket => b"SOCKET\0",
+            HookType::SocketAlloc => b"SOCK_ALLOC\0",
+            HookType::SocketConnect => b"SOCK_CONNECT\0",
+            HookType::Dup => b"DUP\0",
         }
     }
 }
@@ -74,11 +78,26 @@ pub struct MmapEvent {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Default)]
-pub struct SocketEvent {
+pub struct SocketAllocEvent {
     pub header: EventHeader,
     pub fd: Fd,
     pub domain: u32,
     pub type_: u32,
     pub protocol: u32,
+}
+
+#[repr(C)]
+pub struct SocketConnectEvent {
+    pub header: EventHeader,
+    pub fd: Fd,
+    pub ip: u32,
+    pub port: u16,
+    pub is_ipv6: bool,
+}
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DupEvent {
+    pub header: EventHeader,
+    pub old_fd: Fd,
+    pub new_fd: Fd,
 }

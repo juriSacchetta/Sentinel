@@ -1,3 +1,8 @@
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+
+use log::warn;
+use sentinel_common::SocketConnectEvent;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SocketDomain {
     Ipv4,
@@ -42,6 +47,31 @@ impl From<u32> for SocketType {
             libc::SOCK_RAW => SocketType::Raw,
             libc::SOCK_SEQPACKET => SocketType::SeqPacket,
             _ => SocketType::Unknown(val),
+        }
+    }
+}
+
+/// Extension trait to add functionality to the shared Event struct
+/// ONLY within the userspace context.
+pub trait SocketEventExt {
+    fn to_socket_addr(&self) -> Option<SocketAddr>;
+}
+impl SocketEventExt for SocketConnectEvent {
+    fn to_socket_addr(&self) -> Option<SocketAddr> {
+        // 1. Convert Port (Big Endian -> Native)
+        let port = u16::from_be(self.port);
+
+        // 2. Convert IP (u32 -> Ipv4Addr)
+        // Note: The kernel stores IPv4 as Big Endian in the struct.
+        let ip = Ipv4Addr::from(self.ip.to_be());
+
+        // 3. Construct SocketAddr
+        // Note: Currently implementing IPv4 only as per your struct definition
+        if self.is_ipv6 {
+            warn!("IPv6 address conversion not implemented");
+            None
+        } else {
+            Some(SocketAddr::V4(SocketAddrV4::new(ip, port)))
         }
     }
 }
