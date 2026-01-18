@@ -11,9 +11,7 @@ use aya::{
 };
 use bytes::BytesMut;
 use log::{debug, info, warn};
-use sentinel_common::{
-    EventHeader, ExecveEvent, HookType, MemfdEnterEvent, MemfdExitEvent, MmapEvent,
-};
+use sentinel_common::{EventHeader, ExecveEvent, HookType, MemfdEvent, MmapEvent};
 use tokio::{io::unix::AsyncFd, signal};
 
 use crate::core::{SharedTracker, TrackerState};
@@ -121,47 +119,32 @@ fn process_packet(buf: &[u8], tracker_mutex: &SharedTracker) {
     let header = unsafe { *(ptr as *const EventHeader) };
 
     match header.event_type {
-        HookType::MemfdCreate => {
-            if buf.len() >= mem::size_of::<MemfdEnterEvent>() {
-                let event = unsafe { (ptr as *const MemfdEnterEvent).read_unaligned() };
+        HookType::Memfd => {
+            if buf.len() >= mem::size_of::<MemfdEvent>() {
+                let event = unsafe { (ptr as *const MemfdEvent).read_unaligned() };
 
                 let name = String::from_utf8_lossy(&event.filename)
                     .trim_matches('\0')
                     .to_string();
 
                 {
+                    // Update Tracker directly (No more pending state needed)
                     let mut tracker = tracker_mutex.lock().unwrap();
-                    tracker.insert_pending(header.pid, name.clone());
+                    tracker.add_active(header.pid, event.fd, &event.filename);
                 }
 
                 println!(
-                    "[ENTER] PID: {:<6} | Asking for File: '{}'",
-                    header.pid, name
+                    "ℹ️  [TRACK] PID {} created memfd FD {} ('{}')",
+                    header.pid, event.fd, name
                 );
-            }
-        }
-        HookType::MemfdExit => {
-            if buf.len() >= mem::size_of::<MemfdExitEvent>() {
-                let event = unsafe { (ptr as *const MemfdExitEvent).read_unaligned() };
-
-                {
-                    let mut tracker = tracker_mutex.lock().unwrap();
-                    tracker.promote_to_active(header.pid, event.fd);
-                }
-
-                println!(
-                    "ℹ️  [TRACK] PID {} created memfd FD {}",
-                    header.pid, event.fd
-                );
-                println!("[EXIT]  PID: {:<6} | Created FD: {}", header.pid, event.fd);
             }
         }
         HookType::Execve => {
             if buf.len() >= mem::size_of::<ExecveEvent>() {
                 let event = unsafe { (ptr as *const ExecveEvent).read_unaligned() };
-                let tracker = tracker_mutex.lock().unwrap();
+                let mut tracker = tracker_mutex.lock().unwrap();
 
-                if let Some(map) = tracker.get_active(&header.pid)
+                if let Some(map) = tracker.get(&header.pid)
                     && let Some(name) = map.get(&event.fd)
                 {
                     println!("🚨 [ALERT] FILELESS EXECUTION DETECTED!");
@@ -176,9 +159,9 @@ fn process_packet(buf: &[u8], tracker_mutex: &SharedTracker) {
             if buf.len() >= mem::size_of::<MmapEvent>() {
                 let event = unsafe { (ptr as *const MmapEvent).read_unaligned() };
 
-                let state = tracker_mutex.lock().unwrap();
+                let mut state = tracker_mutex.lock().unwrap();
 
-                if let Some(map) = state.get_active(&header.pid)
+                if let Some(map) = state.get(&header.pid)
                     && let Some(name) = map.get(&event.fd)
                 {
                     let is_executable = (event.prot & (libc::PROT_EXEC as u32)) != 0;

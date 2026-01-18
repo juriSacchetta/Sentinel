@@ -3,12 +3,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-
 pub struct TrackerState {
-    // Step 1: Holding area (PID -> Filename waiting for FD)
-    pending: HashMap<u32, String>,
-    
-    // Step 2: Active area (PID -> (FD -> Filename))
     active: HashMap<u32, HashMap<u32, String>>,
 }
 
@@ -21,23 +16,21 @@ impl Default for TrackerState {
 impl TrackerState {
     pub fn new() -> Self {
         TrackerState {
-            pending: HashMap::new(),
             active: HashMap::new(),
         }
     }
 
-    pub fn insert_pending(&mut self, pid: u32, filename: String) {
-        self.pending.insert(pid, filename);
-    }
+    pub fn add_active(&mut self, pid: u32, fd: u32, filename: &[u8]) {
+        let name = String::from_utf8_lossy(filename)
+            .trim_matches('\0')
+            .to_string();
 
-    pub fn promote_to_active(&mut self, pid: u32, fd: u32) {
-        if let Some(filename) = self.pending.remove(&pid) {
-            let entry = self.active.entry(pid).or_default();
-            entry.insert(fd, filename);
-        }
+        self.active
+            .entry(pid)
+            .or_default()
+            .insert(fd, name.to_string());
     }
-
-    pub fn get_active(&self, pid: &u32) -> Option<&HashMap<u32, String>> {
+    pub fn get(&mut self, pid: &u32) -> Option<&HashMap<u32, String>> {
         self.active.get(pid)
     }
 }
