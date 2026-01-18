@@ -3,7 +3,7 @@ use aya_ebpf::{
     maps::PerfEventArray,
     programs::TracePointContext,
 };
-use sentinel_common::{EventHeader, ExecveEvent, HookType, MmapEvent};
+use sentinel_common::{EventHeader, ExecveEvent, Fd, HookType, MmapEvent};
 
 use crate::make_header;
 
@@ -17,7 +17,7 @@ pub static EVENTS: PerfEventArray<EventHeader> = PerfEventArray::new(0);
 pub fn sys_enter_execveat(ctx: TracePointContext) -> u32 {
     let fd = unsafe {
         match ctx.read_at::<i64>(16) {
-            Ok(val) => val as u32,
+            Ok(val) => val as Fd,
             Err(_) => return 0,
         }
     };
@@ -42,7 +42,7 @@ pub fn sys_enter_execveat(ctx: TracePointContext) -> u32 {
 #[tracepoint]
 pub fn sys_enter_mmap(ctx: TracePointContext) -> u32 {
     let prot = unsafe { ctx.read_at::<u64>(32).unwrap_or(0) as u32 };
-    let fd = unsafe { ctx.read_at::<u64>(48).unwrap_or(0) as u32 };
+    let fd = unsafe { ctx.read_at::<u64>(48).unwrap_or(0) as Fd };
 
     let event = MmapEvent {
         header: make_header(HookType::Mmap),

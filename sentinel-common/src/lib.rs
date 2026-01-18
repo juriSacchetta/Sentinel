@@ -1,5 +1,12 @@
 #![no_std]
 
+use core::ffi::{c_int, c_uint};
+
+pub type Pid = c_int;
+pub type Fd = c_int;
+pub type Tid = c_int;
+pub type KFlag = c_uint;
+
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub enum HookType {
@@ -27,8 +34,8 @@ impl HookType {
 #[derive(Clone, Copy, Default, Debug)]
 pub struct EventHeader {
     pub event_type: HookType,
-    pub pid: u32,
-    pub tid: u32,
+    pub pid: Pid,
+    pub tid: Tid,
 }
 
 #[repr(C)]
@@ -36,7 +43,7 @@ pub struct EventHeader {
 pub struct MemfdEvent {
     pub header: EventHeader,
     pub filename: [u8; 256],
-    pub fd: u32,
+    pub fd: Fd,
 }
 
 impl Default for MemfdEvent {
@@ -53,7 +60,7 @@ impl Default for MemfdEvent {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ExecveEvent {
     pub header: EventHeader,
-    pub fd: u32,
+    pub fd: Fd,
     pub flags: u32,
 }
 
@@ -61,7 +68,7 @@ pub struct ExecveEvent {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct MmapEvent {
     pub header: EventHeader,
-    pub fd: u32,
+    pub fd: Fd,
     pub prot: u32,  // Protection flags (Read/Write/Exec)
     pub flags: u32, // Map flags (Shared/Private)
 }
@@ -70,7 +77,7 @@ pub struct MmapEvent {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SocketEvent {
     pub header: EventHeader,
-    pub fd: u32,
+    pub fd: Fd,
     pub domain: u32,
     pub type_: u32,
     pub protocol: u32,

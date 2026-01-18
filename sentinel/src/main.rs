@@ -1,7 +1,9 @@
 mod bus;
 mod core;
 mod detectors;
-use std::sync::{Arc, Mutex};
+mod utils;
+
+use std::sync::Arc;
 
 use aya::{maps::perf::PerfEventArray, programs::TracePoint, util::online_cpus};
 use bytes::BytesMut;
@@ -10,13 +12,13 @@ use tokio::{io::unix::AsyncFd, signal};
 
 use crate::{
     bus::EventBus,
-    core::TrackerState,
+    core::ProcessRegistry,
     detectors::{FilelessDetector, ReflectiveLoaderDetector},
 };
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    env_logger::init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     // Bump the memlock rlimit. This is needed for older kernels that don't use the
     // new memcg based accounting, see https://lwn.net/Articles/837122/
@@ -38,11 +40,11 @@ async fn main() -> anyhow::Result<()> {
         "/sentinel"
     )))?;
 
-    let tracker = Arc::new(Mutex::new(TrackerState::new()));
+    let registry = ProcessRegistry::new();
 
     // 3. Setup Event Bus & Register Detectors
     //    Ideally, wrap EventBus in Arc so it can be shared across async tasks
-    let mut bus = EventBus::new(tracker.clone());
+    let mut bus = EventBus::new(registry);
     bus.register(FilelessDetector);
     bus.register(ReflectiveLoaderDetector);
     // Future: bus.register(ReverseShellDetector);

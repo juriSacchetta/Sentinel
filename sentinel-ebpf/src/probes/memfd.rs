@@ -4,7 +4,7 @@ use aya_ebpf::{
     maps::HashMap,
     programs::TracePointContext,
 };
-use sentinel_common::{HookType, MemfdEvent};
+use sentinel_common::{Fd, HookType, MemfdEvent, Pid};
 
 use crate::{get_pid_tid, make_header};
 
@@ -21,7 +21,7 @@ impl Default for MemfdState {
 }
 
 #[map]
-pub static MEMFD_STASH: HashMap<u32, MemfdState> = HashMap::with_max_entries(1024, 0);
+pub static MEMFD_STASH: HashMap<Pid, MemfdState> = HashMap::with_max_entries(1024, 0);
 
 #[tracepoint]
 pub fn memfd_create(ctx: TracePointContext) -> u32 {
@@ -60,7 +60,7 @@ pub fn memfd_exit(ctx: TracePointContext) -> u32 {
             let state = *state_ptr;
             let event = MemfdEvent {
                 header: make_header(HookType::Memfd),
-                fd: ret as u32,
+                fd: ret as Fd,
                 filename: state.filename,
             };
 

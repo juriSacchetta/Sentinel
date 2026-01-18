@@ -2,19 +2,19 @@
 #![no_main]
 
 use aya_ebpf::helpers::bpf_get_current_pid_tgid;
-use sentinel_common::{EventHeader, HookType};
+use sentinel_common::{EventHeader, HookType, Pid, Tid};
 
 mod macros;
 mod probes;
 
 #[inline(always)]
-pub fn get_pid_tid() -> (u32, u32) {
+pub fn get_pid_tid() -> (Pid, Tid) {
     // bpf_get_current_pid_tgid() returns:
     // Upper 32 bits: TGID (Process ID in userspace terms)
     // Lower 32 bits: TID  (Thread ID)
     let pid_tgid = bpf_get_current_pid_tgid();
-    let tid = pid_tgid as u32;
-    let pid = (pid_tgid >> 32) as u32;
+    let tid = pid_tgid as Tid;
+    let pid = (pid_tgid >> 32) as Pid;
     (pid, tid)
 }
 

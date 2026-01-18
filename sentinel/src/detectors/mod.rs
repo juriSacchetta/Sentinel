@@ -1,12 +1,12 @@
 use sentinel_common::EventHeader;
 
-use crate::core::SharedTracker;
-
 mod fileless;
 mod reflective;
 
 pub use fileless::FilelessDetector;
 pub use reflective::ReflectiveLoaderDetector;
+
+use crate::core::ProcessRegistry;
 
 pub trait Detector: Send + Sync {
     /// Returns the name of the detector (for logging)
@@ -14,5 +14,5 @@ pub trait Detector: Send + Sync {
 
     /// Process a raw event buffer.
     /// Returns `true` if this detector handled the event (optional optimization).
-    fn on_event(&self, header: &EventHeader, data: &[u8], tracker: &SharedTracker);
+    fn on_event(&self, header: &EventHeader, data: &[u8], registry: &ProcessRegistry);
 }

@@ -3,18 +3,18 @@ use std::mem;
 use log::info;
 use sentinel_common::EventHeader;
 
-use crate::{core::SharedTracker, detectors::Detector};
+use crate::{core::ProcessRegistry, detectors::Detector};
 
 pub struct EventBus {
     detectors: Vec<Box<dyn Detector>>,
-    tracker: SharedTracker,
+    registry: ProcessRegistry,
 }
 
 impl EventBus {
-    pub fn new(tracker: SharedTracker) -> Self {
+    pub fn new(registry: ProcessRegistry) -> Self {
         Self {
             detectors: Vec::new(),
-            tracker,
+            registry,
         }
     }
 
@@ -34,7 +34,7 @@ impl EventBus {
 
         // Dispatch to all detectors
         for detector in &self.detectors {
-            detector.on_event(&header, buf, &self.tracker);
+            detector.on_event(&header, buf, &self.registry);
         }
     }
 }

@@ -3,7 +3,7 @@ use aya_ebpf::{
     maps::HashMap,
     programs::TracePointContext,
 };
-use sentinel_common::{HookType, SocketEvent};
+use sentinel_common::{Fd, HookType, Pid, SocketEvent};
 
 use crate::{get_pid_tid, make_header};
 
@@ -16,7 +16,7 @@ pub struct SocketState {
 }
 
 #[map]
-pub static SOCKET_STASH: HashMap<u32, SocketState> = HashMap::with_max_entries(1024, 0);
+pub static SOCKET_STASH: HashMap<Pid, SocketState> = HashMap::with_max_entries(1024, 0);
 
 #[tracepoint]
 pub fn sys_enter_socket(ctx: TracePointContext) -> u32 {
@@ -47,7 +47,7 @@ pub fn sys_exit_socket(ctx: TracePointContext) -> u32 {
             let state = *state_ptr;
             let event = SocketEvent {
                 header: make_header(HookType::Socket),
-                fd: ret as u32,
+                fd: ret as Fd,
                 domain: state.domain,
                 type_: state.type_,
                 protocol: state.protocol,
