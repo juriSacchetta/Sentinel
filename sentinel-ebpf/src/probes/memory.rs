@@ -4,7 +4,7 @@ use aya_ebpf::{
     maps::HashMap,
     programs::TracePointContext,
 };
-use sentinel_common::{Fd, HookType, MemfdEvent, Pid};
+use sentinel_common::{Fd, HookType, MemfdEvent, MmapEvent, Pid};
 
 use crate::{get_pid_tid, make_header};
 
@@ -70,5 +70,21 @@ pub fn memfd_exit(ctx: TracePointContext) -> u32 {
         let _ = MEMFD_STASH.remove(&tid);
     }
 
+    0
+}
+
+#[tracepoint]
+pub fn sys_enter_mmap(ctx: TracePointContext) -> u32 {
+    let prot = unsafe { ctx.read_at::<u64>(32).unwrap_or(0) as u32 };
+    let fd = unsafe { ctx.read_at::<u64>(48).unwrap_or(0) as Fd };
+
+    let event = MmapEvent {
+        header: make_header(HookType::Mmap),
+        fd,
+        prot,
+        flags: 0, // We can skip others to save bandwidth
+    };
+
+    send_event!(ctx, event);
     0
 }
