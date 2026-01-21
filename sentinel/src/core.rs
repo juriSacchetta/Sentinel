@@ -34,8 +34,8 @@ impl From<SocketAllocEvent> for DescriptorType {
     fn from(event: SocketAllocEvent) -> Self {
         DescriptorType::Socket {
             domain: SocketDomain::from(event.domain),
-            type_: event.type_ as u32,
-            protocol: event.protocol as u32,
+            type_: event.type_,
+            protocol: event.protocol,
             remote_addr: None,
         }
     }
@@ -51,13 +51,13 @@ impl Display for DescriptorType {
                 protocol,
                 remote_addr,
             } => {
+                let remote_str = remote_addr
+                    .map(|a| a.to_string())
+                    .unwrap_or_else(|| "N/A".to_string());
                 write!(
                     f,
                     "Socket(domain: {:?}, type: {}, protocol: {}, remote: {})",
-                    domain,
-                    type_,
-                    protocol,
-                    remote_addr.unwrap_or_else(|| "N/A".parse().unwrap())
+                    domain, type_, protocol, remote_str
                 )
             }
             DescriptorType::File { path } => write!(f, "File({})", path),

@@ -1,6 +1,6 @@
 use std::mem;
 
-use log::info;
+use log::{info, warn};
 use sentinel_common::{EventHeader, ExecveEvent, HookType, MemfdEvent};
 
 use super::Detector;
@@ -45,11 +45,11 @@ impl Detector for FilelessDetector {
                 let process_lock = registry.get_or_create(header.pid);
                 let process = process_lock.lock().unwrap();
 
-                if let Some(name) = process.fds.get(&event.fd) {
-                    println!("🚨 [ALERT] FILELESS EXECUTION DETECTED!");
-                    println!("    PID:   {}", process.pid);
-                    println!("    FD:    {}", event.fd);
-                    println!("    Name:  {}", name);
+                if let Some(DescriptorType::Memfd { name }) = process.fds.get(&event.fd) {
+                    warn!(
+                        "🚨 FILELESS EXECUTION DETECTED! PID: {} executed memfd FD {} ('{}')",
+                        process.pid, event.fd, name
+                    );
                 }
             }
             _ => {} // Ignore other events

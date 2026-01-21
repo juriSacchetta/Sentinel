@@ -4,24 +4,27 @@ use aya_ebpf::{
     maps::HashMap,
     programs::TracePointContext,
 };
-use sentinel_common::{Fd, HookType, MemfdEvent, MmapEvent, Pid};
+use sentinel_common::{Fd, HookType, MemfdEvent, MmapEvent, Tid};
 
 use crate::{get_pid_tid, make_header};
 
+/// Temporary storage for memfd_create syscall state.
+/// Using 64 bytes for filename - memfd names are typically short.
+/// This keeps the struct small enough for BPF's 512-byte stack limit.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct MemfdState {
-    pub filename: [u8; 256],
+    pub filename: [u8; 64],
 }
 
 impl Default for MemfdState {
     fn default() -> Self {
-        Self { filename: [0; 256] }
+        Self { filename: [0; 64] }
     }
 }
 
 #[map]
-pub static MEMFD_STASH: HashMap<Pid, MemfdState> = HashMap::with_max_entries(1024, 0);
+pub static MEMFD_STASH: HashMap<Tid, MemfdState> = HashMap::with_max_entries(1024, 0);
 
 #[tracepoint]
 pub fn memfd_create(ctx: TracePointContext) -> u32 {
@@ -46,14 +49,14 @@ pub fn memfd_create(ctx: TracePointContext) -> u32 {
         }
     }
 
-    let _ = MEMFD_STASH.insert(&tid, &state, 0);
+    let _ = MEMFD_STASH.insert(tid, state, 0);
     0
 }
 
 #[tracepoint]
 pub fn memfd_exit(ctx: TracePointContext) -> u32 {
     let (_, tid) = get_pid_tid();
-    if let Some(state_ptr) = unsafe { MEMFD_STASH.get(&tid) } {
+    if let Some(state_ptr) = unsafe { MEMFD_STASH.get(tid) } {
         let ret: i64 = unsafe { ctx.read_at(16).unwrap_or(-1) };
 
         if ret >= 0 {
@@ -67,7 +70,7 @@ pub fn memfd_exit(ctx: TracePointContext) -> u32 {
             send_event!(ctx, event);
         }
 
-        let _ = MEMFD_STASH.remove(&tid);
+        let _ = MEMFD_STASH.remove(tid);
     }
 
     0

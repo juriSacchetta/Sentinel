@@ -67,7 +67,7 @@ impl SocketEventExt for SocketConnectEvent {
 
         // 3. Construct SocketAddr
         // Note: Currently implementing IPv4 only as per your struct definition
-        if self.is_ipv6 {
+        if self.is_ipv6 != 0 {
             warn!("IPv6 address conversion not implemented");
             None
         } else {

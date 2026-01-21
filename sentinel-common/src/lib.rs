@@ -42,11 +42,13 @@ pub struct EventHeader {
     pub tid: Tid,
 }
 
+/// Event sent when memfd_create completes successfully.
+/// Filename buffer is 64 bytes - memfd names are typically short.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct MemfdEvent {
     pub header: EventHeader,
-    pub filename: [u8; 256],
+    pub filename: [u8; 64],
     pub fd: Fd,
 }
 
@@ -54,7 +56,7 @@ impl Default for MemfdEvent {
     fn default() -> Self {
         Self {
             header: EventHeader::default(),
-            filename: [0; 256],
+            filename: [0; 64],
             fd: 0,
         }
     }
@@ -92,7 +94,8 @@ pub struct SocketConnectEvent {
     pub fd: Fd,
     pub ip: u32,
     pub port: u16,
-    pub is_ipv6: bool,
+    /// 0 = IPv4, 1 = IPv6. Using u8 instead of bool for stable ABI in repr(C).
+    pub is_ipv6: u8,
 }
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]

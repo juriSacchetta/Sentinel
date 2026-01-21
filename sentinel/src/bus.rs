@@ -28,9 +28,9 @@ impl EventBus {
             return;
         }
 
-        // Read Header once
-        let ptr = buf.as_ptr();
-        let header = unsafe { *(ptr as *const EventHeader) };
+        // Read Header once (use read_unaligned for safety - buffer may not be aligned)
+        let ptr = buf.as_ptr() as *const EventHeader;
+        let header = unsafe { ptr.read_unaligned() };
 
         // Dispatch to all detectors
         for detector in &self.detectors {

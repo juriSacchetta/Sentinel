@@ -5,7 +5,7 @@ use aya_ebpf::{
     maps::HashMap,
     programs::TracePointContext,
 };
-use sentinel_common::{Fd, HookType, Pid, SocketAllocEvent, SocketConnectEvent};
+use sentinel_common::{Fd, HookType, SocketAllocEvent, SocketConnectEvent, Tid};
 
 use crate::{get_pid_tid, make_header, vmlinux::sockaddr_in};
 
@@ -18,7 +18,7 @@ pub struct SocketState {
 }
 
 #[map]
-pub static SOCKET_STASH: HashMap<Pid, SocketState> = HashMap::with_max_entries(1024, 0);
+pub static SOCKET_STASH: HashMap<Tid, SocketState> = HashMap::with_max_entries(1024, 0);
 
 #[tracepoint]
 pub fn sys_enter_socket(ctx: TracePointContext) -> u32 {
@@ -34,7 +34,7 @@ pub fn sys_enter_socket(ctx: TracePointContext) -> u32 {
         protocol,
     };
 
-    let _ = SOCKET_STASH.insert(&tid, &state, 0);
+    let _ = SOCKET_STASH.insert(tid, state, 0);
     0
 }
 
@@ -42,7 +42,7 @@ pub fn sys_enter_socket(ctx: TracePointContext) -> u32 {
 pub fn sys_exit_socket(ctx: TracePointContext) -> u32 {
     let (_, tid) = get_pid_tid();
 
-    if let Some(state_ptr) = unsafe { SOCKET_STASH.get(&tid) } {
+    if let Some(state_ptr) = unsafe { SOCKET_STASH.get(tid) } {
         let ret = unsafe { ctx.read_at::<i64>(16).unwrap_or(-1) };
 
         if ret >= 0 {
@@ -56,7 +56,7 @@ pub fn sys_exit_socket(ctx: TracePointContext) -> u32 {
             };
             send_event!(ctx, event);
         }
-        let _ = SOCKET_STASH.remove(&tid);
+        let _ = SOCKET_STASH.remove(tid);
     }
     0
 }
@@ -114,7 +114,7 @@ pub fn sys_enter_connect(ctx: TracePointContext) -> u32 {
             fd,
             ip,
             port,
-            is_ipv6: false,
+            is_ipv6: 0, // IPv4
         };
 
         send_event!(ctx, event);

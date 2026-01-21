@@ -30,8 +30,7 @@ macro_rules! send_event {
             EbpfContext,
             helpers::{bpf_get_smp_processor_id, bpf_perf_event_output},
         };
-
-        use crate::probes::EVENTS;
+        use $crate::probes::EVENTS;
         unsafe {
             let size = mem::size_of_val(&$event) as u64;
             let flags = bpf_get_smp_processor_id() as u64;

@@ -67,15 +67,35 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    // Socket tracking (for reverse shell detection)
+    attach_hook(
+        &mut ebpf,
+        "sys_enter_socket",
+        "syscalls",
+        "sys_enter_socket",
+    );
+    attach_hook(&mut ebpf, "sys_exit_socket", "syscalls", "sys_exit_socket");
+    attach_hook(
+        &mut ebpf,
+        "sys_enter_connect",
+        "syscalls",
+        "sys_enter_connect",
+    );
+
+    // FD duplication tracking (for reverse shell detection)
+    attach_hook(&mut ebpf, "sys_enter_dup2", "syscalls", "sys_enter_dup2");
+    attach_hook(&mut ebpf, "sys_enter_dup3", "syscalls", "sys_enter_dup3");
+
+    // Memfd tracking (for fileless execution detection)
     attach_hook(
         &mut ebpf,
         "memfd_create",
         "syscalls",
         "sys_enter_memfd_create",
     );
-
     attach_hook(&mut ebpf, "memfd_exit", "syscalls", "sys_exit_memfd_create");
 
+    // Execution tracking
     attach_hook(
         &mut ebpf,
         "sys_enter_execveat",
@@ -83,6 +103,7 @@ async fn main() -> anyhow::Result<()> {
         "sys_enter_execveat",
     );
 
+    // Memory mapping tracking (for reflective loading detection)
     attach_hook(&mut ebpf, "sys_enter_mmap", "syscalls", "sys_enter_mmap");
 
     let mut events = PerfEventArray::try_from(ebpf.take_map("EVENTS").unwrap())?;
